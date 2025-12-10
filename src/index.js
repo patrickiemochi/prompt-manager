@@ -1,5 +1,3 @@
-// index.js - React 應用入口點
-
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
