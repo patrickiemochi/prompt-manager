@@ -360,3 +360,4 @@ MIT License - 詳見 LICENSE 文件
 **Happy Prompting! 🎨✨**
 
 Made with ❤️ for AI Art enthusiasts
+# prompt-manager
