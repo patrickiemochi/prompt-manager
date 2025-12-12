@@ -1,12 +1,12 @@
 // app.jsx - 主應用程式
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import './App.css';
 
 // Supabase 初始化
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = (supabaseUrl && supabaseAnonKey) ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 // 分類配置（暫時先保留，之後可以換成吃資料庫）
 const CATEGORIES = {
@@ -21,17 +21,20 @@ const CATEGORIES = {
 
 // Flux 提示詞範本
 const FLUX_TEMPLATE = (prompts) => {
-  return `${prompts.map(p => p.english_text).join(', ')}`;
+  return `${prompts.map(p => p?.english_text || '').filter(Boolean).join(', ')}`;
 };
 
 // SDXL 提示詞範本
 const SDXL_TEMPLATE = (prompts) => {
-  return `${prompts.map(p => p.english_text).join(', ')} | High quality, detailed, 8k`;
+  return `${prompts.map(p => p?.english_text || '').filter(Boolean).join(', ')} | High quality, detailed, 8k`;
 };
 
 // 中文提示詞範本
 const CHINESE_TEMPLATE = (prompts) => {
-  return prompts.map(p => `${p.chinese_text}（${p.english_text}）`).join(' + ');
+  return prompts
+    .map(p => p ? `${p.chinese_text}（${p.english_text}）` : '')
+    .filter(Boolean)
+    .join(' + ');
 };
 
 export default function App() {
@@ -62,28 +65,38 @@ export default function App() {
   useEffect(() => {
     loadPrompts();
     loadCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadPrompts = async () => {
     setLoading(true);
+    if (!supabase) {
+      console.warn('Supabase not initialized - skipping loadPrompts');
+      setLoading(false);
+      return;
+    }
     try {
       const { data, error } = await supabase
         .from('prompts')
         .select('*')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
-      
+
       if (error) throw error;
       setPrompts(data || []);
     } catch (error) {
       console.error('Error loading prompts:', error);
-      alert('無法載入提示詞：' + error.message);
+      alert('無法載入提示詞：' + (error?.message || error));
     } finally {
       setLoading(false);
     }
   };
 
   const loadCategories = async () => {
+    if (!supabase) {
+      console.warn('Supabase not initialized - skipping loadCategories');
+      return;
+    }
     try {
       const { data, error } = await supabase
         .from("categories")
@@ -103,36 +116,154 @@ export default function App() {
   const handleAddCategory = async () => {
     if (!newCategoryName.trim()) return;
 
-    const level = parentCategoryId ? 2 : 1;
-
-    const { data, error } = await supabase
-      .from("categories")
-      .insert({
-        name: newCategoryName.trim(),
-        parent_id: parentCategoryId || null,
-        level,
-      })
-      .select()
-      .single();
-
-    if (error) {
-      console.error("Error adding category:", error);
-      alert("新增分類失敗：" + error.message);
+    if (!supabase) {
+      alert('無法新增分類：Supabase 尚未設定');
       return;
     }
 
-    // 清空輸入、重載分類
-    setNewCategoryName("");
-    setParentCategoryId("");
-    await loadCategories();
+    const level = parentCategoryId ? 2 : 1;
+
+    try {
+      const { data, error } = await supabase
+        .from("categories")
+        .insert({
+          name: newCategoryName.trim(),
+          parent_id: parentCategoryId || null,
+          level,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error adding category:", error);
+        alert("新增分類失敗：" + (error?.message || error));
+        return;
+      }
+
+      // 清空輸入、重載分類
+      setNewCategoryName("");
+      setParentCategoryId("");
+      await loadCategories();
+    } catch (error) {
+      console.error('Error adding category:', error);
+      alert('新增分類失敗：' + (error?.message || error));
+    }
   };
-     
+
+  // 新增提示詞處理（插入 supabase 並更新本地狀態）
+  const handleAddPrompt = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    // 簡單驗證
+    if (!newPrompt?.english_text?.trim() || !newPrompt?.chinese_text?.trim() || !newPrompt?.category) {
+      alert('請填寫必要欄位');
+      return;
+    }
+
+    if (!supabase) {
+      alert('無法新增提示詞：Supabase 尚未設定');
+      return;
+    }
+
+    try {
+      const insertPayload = {
+        ...newPrompt,
+        english_text: newPrompt.english_text.trim(),
+        chinese_text: newPrompt.chinese_text.trim(),
+        is_active: true,
+        created_at: new Date().toISOString()
+      };
+
+      const { data, error } = await supabase
+        .from('prompts')
+        .insert(insertPayload)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      setPrompts(prev => [data, ...(prev || [])]);
+      setNewPrompt({
+        english_text: '',
+        chinese_text: '',
+        category: '',
+        sub_category: '',
+        image_url: ''
+      });
+      setShowAddForm(false);
+    } catch (error) {
+      console.error('Error adding prompt:', error);
+      alert('新增提示詞失敗：' + (error?.message || error));
+    }
+  };
+
+  // 刪除提示詞（建議使用軟刪除，將 is_active 設為 false）
+  const handleDeletePrompt = async (id) => {
+    if (!id) return;
+    if (!window.confirm('確定要刪除這個提示詞嗎？')) return;
+
+    if (!supabase) {
+      alert('無法刪除提示詞：Supabase 尚未設定');
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('prompts')
+        .update({ is_active: false })
+        .eq('id', id)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // 從本地狀態移除
+      setPrompts(prev => (prev || []).filter(p => p.id !== id));
+      // 也從已選集合移除
+      setSelectedPrompts(prev => {
+        const s = new Set(prev);
+        s.delete(id);
+        return s;
+      });
+    } catch (error) {
+      console.error('Error deleting prompt:', error);
+      alert('刪除失敗：' + (error?.message || error));
+    }
+  };
+
+  // 計算篩選後的提示詞
+  const filteredPrompts = useMemo(() => {
+    const q = (searchText || '').trim().toLowerCase();
+    return (prompts || []).filter(p => {
+      if (!p) return false;
+      if (filterCategory && p.category !== filterCategory) return false;
+      if (filterSubCategory && p.sub_category !== filterSubCategory) return false;
+      if (q) {
+        const hay = `${p.english_text || ''} ${p.chinese_text || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [prompts, filterCategory, filterSubCategory, searchText]);
+
+  const togglePromptSelection = (id) => {
+    if (!id) return;
+    setSelectedPrompts(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(id)) {
+        newSelection.delete(id);
+      } else {
+        newSelection.add(id);
+      }
+      return newSelection;
+    });
+  };
 
   // 匯出提示詞
-  const exportPrompts = (format) => {
-    const selected = Array.from(selectedPrompts).map(id => 
-      prompts.find(p => p.id === id)
-    );
+  const exportPrompts = async (format) => {
+    const selected = Array.from((selectedPrompts || new Set()))
+      .map(id => (prompts || []).find(p => p.id === id))
+      .filter(Boolean);
 
     if (selected.length === 0) {
       alert('請先勾選提示詞');
@@ -163,28 +294,60 @@ export default function App() {
         return;
     }
 
-    // 複製到剪貼板
-    navigator.clipboard.writeText(exportText).then(() => {
-      alert('已複製到剪貼板！');
-      setShowExportModal(false);
+    const safeExport = String(exportText || '');
 
-      // 記錄匯出
-      supabase.from('export_logs').insert([{
-        export_format: format,
-        selected_prompts: selected.length,
-        exported_text: exportText
-      }]).catch(console.error);
-    });
-  };
-
-  const togglePromptSelection = (id) => {
-    const newSelection = new Set(selectedPrompts);
-    if (newSelection.has(id)) {
-      newSelection.delete(id);
-    } else {
-      newSelection.add(id);
+    // 優先嘗試使用 Clipboard API
+    try {
+      if (navigator?.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        await navigator.clipboard.writeText(safeExport);
+        alert('已複製到剪貼簿！');
+        setShowExportModal(false);
+      } else {
+        // fallback: 建立暫時 textarea，選取並複製
+        const textarea = document.createElement('textarea');
+        textarea.value = safeExport;
+        // 避免畫面跳動
+        textarea.style.position = 'fixed';
+        textarea.style.top = '-9999px';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          const ok = document.execCommand('copy');
+          if (ok) {
+            alert('已複製到剪貼簿（備援方法）！');
+            setShowExportModal(false);
+          } else {
+            throw new Error('execCommand copy failed');
+          }
+        } finally {
+          document.body.removeChild(textarea);
+        }
+      }
+    } catch (err) {
+      console.error('Clipboard write failed, falling back to download', err);
+      // fallback: 下載檔案
+      try {
+        const blob = new Blob([safeExport], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || 'export.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setShowExportModal(false);
+      } catch (downloadErr) {
+        console.error('Download fallback failed', downloadErr);
+        alert('匯出失敗：' + (downloadErr?.message || downloadErr));
+      }
     }
-    setSelectedPrompts(newSelection);
+
+    // 記錄匯出（非阻塞，但加上存在性檢查）
+    if (supabase) {
+      supabase.from('export_logs').insert([{ export_format: format, selected_prompts: selected.length, exported_text: safeExport }]).catch(console.error);
+    }
   };
 
   if (loading) {
@@ -194,49 +357,50 @@ export default function App() {
   return (
     <div className="container">
       <header className="header">
-        <h3>✨ AI 提示詞管理器</h1>
+        <h3>✨ AI 提示詞管理器</h3>
         <p>管理和匯出 Flux / SDXL 提示詞</p>
       </header>
 
-              <div className="add-category-panel">
-          <h3>新增分類 / 子分類</h3>
+      <div className="add-category-panel">
+        <h3>新增分類 / 子分類</h3>
 
-          <input
-            type="text"
-            placeholder="分類名稱"
-            value={newCategoryName}
-            onChange={(e) => setNewCategoryName(e.target.value)}
-          />
+        <input
+          type="text"
+          placeholder="分類名稱"
+          value={newCategoryName}
+          onChange={(e) => setNewCategoryName(e.target.value)}
+        />
 
-          <select
-            value={parentCategoryId}
-            onChange={(e) => setParentCategoryId(e.target.value)}
-          >
-            <option value="">（建立新的大分類）</option>
-            {categoriesFromDb
-              .filter((c) => !c.parent_id) // 只列出大分類當作可選的 parent
-              .map((cat) => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))}
-          </select>
+        <select
+          value={parentCategoryId}
+          onChange={(e) => setParentCategoryId(e.target.value)}
+        >
+          <option value="">（建立新的大分類）</option>
+          {categoriesFromDb
+            .filter((c) => !c.parent_id) // 只列出大分類當作可選的 parent
+            .map((cat) => (
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
+            ))}
+        </select>
 
-          <button onClick={handleAddCategory}>新增</button>
-        </div>
+        <button onClick={handleAddCategory}>新增</button>
+      </div>
+
       <div className="main-content">
         {/* 左側：篩選和提示詞庫 */}
         <div className="left-panel">
           {/* 控制按鈕 */}
           <div className="control-buttons">
-            <button 
+            <button
               className="btn btn-primary"
               onClick={() => setShowAddForm(!showAddForm)}
             >
               {showAddForm ? '✕ 關閉' : '+ 新增提示詞'}
             </button>
             {selectedPrompts.size > 0 && (
-              <button 
+              <button
                 className="btn btn-success"
                 onClick={() => setShowExportModal(true)}
               >
@@ -273,7 +437,7 @@ export default function App() {
                   <option key={cat} value={cat}>{cat}</option>
                 ))}
               </select>
-              {newPrompt.category && (
+              {newPrompt.category && CATEGORIES[newPrompt.category] && (
                 <select
                   value={newPrompt.sub_category}
                   onChange={(e) => setNewPrompt({...newPrompt, sub_category: e.target.value})}
@@ -317,7 +481,7 @@ export default function App() {
                 <option key={cat} value={cat}>{cat}</option>
               ))}
             </select>
-            {filterCategory && (
+            {filterCategory && CATEGORIES[filterCategory] && (
               <select
                 value={filterSubCategory}
                 onChange={(e) => setFilterSubCategory(e.target.value)}
@@ -348,7 +512,7 @@ export default function App() {
               <p className="empty-state">找不到符合條件的提示詞</p>
             ) : (
               filteredPrompts.map(prompt => (
-                <div 
+                <div
                   key={prompt.id}
                   className={`prompt-card ${selectedPrompts.has(prompt.id) ? 'selected' : ''}`}
                   onClick={() => togglePromptSelection(prompt.id)}
@@ -365,7 +529,7 @@ export default function App() {
                       <span className="subcategory-badge">{prompt.sub_category}</span>
                     )}
                   </div>
-                  
+
                   <div className="prompt-content">
                     {prompt.image_url && (
                       <img src={prompt.image_url} alt="" className="prompt-image" />
@@ -406,7 +570,7 @@ export default function App() {
                   <h4>Flux 格式</h4>
                   <div className="preview-text">
                     {FLUX_TEMPLATE(
-                      Array.from(selectedPrompts).map(id => prompts.find(p => p.id === id))
+                      Array.from(selectedPrompts).map(id => (prompts || []).find(p => p.id === id)).filter(Boolean)
                     )}
                   </div>
                 </div>
@@ -414,7 +578,7 @@ export default function App() {
                   <h4>中文</h4>
                   <div className="preview-text">
                     {CHINESE_TEMPLATE(
-                      Array.from(selectedPrompts).map(id => prompts.find(p => p.id === id))
+                      Array.from(selectedPrompts).map(id => (prompts || []).find(p => p.id === id)).filter(Boolean)
                     )}
                   </div>
                 </div>
@@ -437,10 +601,10 @@ export default function App() {
               <span>已篩選</span>
               <strong>{filteredPrompts.length}</strong>
             </div>
-            
+
             <h4 style={{marginTop: '20px'}}>分類統計</h4>
             {Object.keys(CATEGORIES).map(cat => {
-              const count = prompts.filter(p => p.category === cat).length;
+              const count = (prompts || []).filter(p => p.category === cat).length;
               return count > 0 ? (
                 <div key={cat} className="stat-item small">
                   <span>{cat}</span>
@@ -458,28 +622,28 @@ export default function App() {
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <h2>選擇匯出格式</h2>
             <div className="export-options">
-              <button 
+              <button
                 className="export-btn"
                 onClick={() => exportPrompts('flux')}
               >
                 <span>⚡ Flux</span>
                 <small>最新模型，推薦</small>
               </button>
-              <button 
+              <button
                 className="export-btn"
                 onClick={() => exportPrompts('sdxl')}
               >
                 <span>🎨 SDXL</span>
                 <small>穩定擴散</small>
               </button>
-              <button 
+              <button
                 className="export-btn"
                 onClick={() => exportPrompts('chinese')}
               >
                 <span>🇨🇳 中文</span>
                 <small>中英對照</small>
               </button>
-              <button 
+              <button
                 className="export-btn"
                 onClick={() => exportPrompts('json')}
               >
@@ -487,7 +651,7 @@ export default function App() {
                 <small>結構化資料</small>
               </button>
             </div>
-            <button 
+            <button
               className="btn btn-outline"
               onClick={() => setShowExportModal(false)}
               style={{marginTop: '20px', width: '100%'}}
