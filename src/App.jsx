@@ -8,7 +8,7 @@ const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-// 分類配置
+// 分類配置（暫時先保留，之後可以換成吃資料庫）
 const CATEGORIES = {
   '人物': ['年齡', '特徵', '裝扮', '表情'],
   '風景': ['場景', '時間', '氛圍'],
@@ -35,6 +35,7 @@ const CHINESE_TEMPLATE = (prompts) => {
 };
 
 export default function App() {
+  // 原本的 state
   const [prompts, setPrompts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedPrompts, setSelectedPrompts] = useState(new Set());
@@ -51,6 +52,11 @@ export default function App() {
     sub_category: '',
     image_url: ''
   });
+
+  // ★ 新增分類用的 state
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [parentCategoryId, setParentCategoryId] = useState(""); // 空字串 = 新的大分類
+  const [categoriesFromDb, setCategoriesFromDb] = useState([]); // 從 Supabase 撈回來的 categories
 
   // 載入資料
   useEffect(() => {
@@ -80,90 +86,47 @@ export default function App() {
   const loadCategories = async () => {
     try {
       const { data, error } = await supabase
-        .from('categories')
-        .select('*')
-        .order('order_index');
-      
-      if (error) throw error;
-      setCategories(data || []);
+        .from("categories")
+        .select("*")
+        .order("order_index", { ascending: true });
+
+      if (error) {
+        console.error("Error loading categories:", error);
+        return;
+      }
+      setCategoriesFromDb(data || []);
     } catch (error) {
-      console.error('Error loading categories:', error);
+      console.error("Error loading categories:", error);
     }
   };
 
-  // 新增提示詞
-  const handleAddPrompt = async (e) => {
-    e.preventDefault();
-    
-    if (!newPrompt.english_text || !newPrompt.chinese_text || !newPrompt.category) {
-      alert('請填寫所有必填欄位');
+  const handleAddCategory = async () => {
+    if (!newCategoryName.trim()) return;
+
+    const level = parentCategoryId ? 2 : 1;
+
+    const { data, error } = await supabase
+      .from("categories")
+      .insert({
+        name: newCategoryName.trim(),
+        parent_id: parentCategoryId || null,
+        level,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Error adding category:", error);
+      alert("新增分類失敗：" + error.message);
       return;
     }
 
-    // 檢查重複
-    const duplicate = prompts.find(p => 
-      p.english_text.toLowerCase() === newPrompt.english_text.toLowerCase() ||
-      p.chinese_text === newPrompt.chinese_text
-    );
-
-    if (duplicate) {
-      const confirmAdd = window.confirm(
-        `找到相似的提示詞：${duplicate.chinese_text}\n\n是否仍要新增？`
-      );
-      if (!confirmAdd) return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from('prompts')
-        .insert([{
-          ...newPrompt,
-          source_app: 'web'
-        }])
-        .select();
-
-      if (error) throw error;
-      
-      setPrompts([data[0], ...prompts]);
-      setNewPrompt({ english_text: '', chinese_text: '', category: '', sub_category: '', image_url: '' });
-      setShowAddForm(false);
-      alert('提示詞已新增！');
-    } catch (error) {
-      alert('新增失敗：' + error.message);
-    }
+    // 清空輸入、重載分類
+    setNewCategoryName("");
+    setParentCategoryId("");
+    await loadCategories();
   };
-
-  // 刪除提示詞
-  const handleDeletePrompt = async (id) => {
-    if (!window.confirm('確定要刪除此提示詞嗎？')) return;
-
-    try {
-      const { error } = await supabase
-        .from('prompts')
-        .update({ is_active: false })
-        .eq('id', id);
-
-      if (error) throw error;
-      setPrompts(prompts.filter(p => p.id !== id));
-      setSelectedPrompts(prev => {
-        prev.delete(id);
-        return new Set(prev);
-      });
-    } catch (error) {
-      alert('刪除失敗：' + error.message);
-    }
-  };
-
-  // 篩選提示詞
-  const filteredPrompts = prompts.filter(prompt => {
-    const matchCategory = !filterCategory || prompt.category === filterCategory;
-    const matchSubCategory = !filterSubCategory || prompt.sub_category === filterSubCategory;
-    const matchSearch = !searchText || 
-      prompt.english_text.toLowerCase().includes(searchText.toLowerCase()) ||
-      prompt.chinese_text.includes(searchText);
-    
-    return matchCategory && matchSubCategory && matchSearch;
-  });
+     
 
   // 匯出提示詞
   const exportPrompts = (format) => {
@@ -231,10 +194,36 @@ export default function App() {
   return (
     <div className="container">
       <header className="header">
-        <h1>✨ AI 提示詞管理器</h1>
+        <h3>✨ AI 提示詞管理器</h1>
         <p>管理和匯出 Flux / SDXL 提示詞</p>
       </header>
 
+              <div className="add-category-panel">
+          <h3>新增分類 / 子分類</h3>
+
+          <input
+            type="text"
+            placeholder="分類名稱"
+            value={newCategoryName}
+            onChange={(e) => setNewCategoryName(e.target.value)}
+          />
+
+          <select
+            value={parentCategoryId}
+            onChange={(e) => setParentCategoryId(e.target.value)}
+          >
+            <option value="">（建立新的大分類）</option>
+            {categoriesFromDb
+              .filter((c) => !c.parent_id) // 只列出大分類當作可選的 parent
+              .map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+          </select>
+
+          <button onClick={handleAddCategory}>新增</button>
+        </div>
       <div className="main-content">
         {/* 左側：篩選和提示詞庫 */}
         <div className="left-panel">
