@@ -333,28 +333,14 @@ h6 {
   letter-spacing: var(--letter-spacing-tight);
 }
 
-h1 {
-  font-size: var(--font-size-4xl);
-}
-h2 {
-  font-size: var(--font-size-3xl);
-}
-h3 {
-  font-size: var(--font-size-2xl);
-}
-h4 {
-  font-size: var(--font-size-xl);
-}
-h5 {
-  font-size: var(--font-size-lg);
-}
-h6 {
-  font-size: var(--font-size-md);
-}
+h1 {font-size: var(--font-size-4xl);}
+h2 {font-size: var(--font-size-3xl);}
+h3 {font-size: var(--font-size-2xl);}
+h4 {font-size: var(--font-size-xl);}
+h5 {font-size: var(--font-size-lg);}
+h6 {font-size: var(--font-size-md);}
 
-p {
-  margin: 0 0 var(--space-16) 0;
-}
+p {margin: 0 0 var(--space-16) 0;}
 
 a {
   color: var(--color-primary);
@@ -362,9 +348,7 @@ a {
   transition: color var(--duration-fast) var(--ease-standard);
 }
 
-a:hover {
-  color: var(--color-primary-hover);
-}
+a:hover {color: var(--color-primary-hover);}
 
 code,
 pre {
@@ -374,9 +358,7 @@ pre {
   border-radius: var(--radius-sm);
 }
 
-code {
-  padding: var(--space-1) var(--space-4);
-}
+code {padding: var(--space-1) var(--space-4);}
 
 pre {
   padding: var(--space-16);
@@ -417,26 +399,18 @@ pre code {
   color: var(--color-btn-primary-text);
 }
 
-.btn--primary:hover {
-  background: var(--color-primary-hover);
-}
+.btn--primary:hover {background: var(--color-primary-hover);}
 
-.btn--primary:active {
-  background: var(--color-primary-active);
-}
+.btn--primary:active {background: var(--color-primary-active);}
 
 .btn--secondary {
   background: var(--color-secondary);
   color: var(--color-text);
 }
 
-.btn--secondary:hover {
-  background: var(--color-secondary-hover);
-}
+.btn--secondary:hover {background: var(--color-secondary-hover);}
 
-.btn--secondary:active {
-  background: var(--color-secondary-active);
-}
+.btn--secondary:active {background: var(--color-secondary-active);}
 
 .btn--outline {
   background: transparent;
@@ -460,9 +434,7 @@ pre code {
   border-radius: var(--radius-md);
 }
 
-.btn--full-width {
-  width: 100%;
-}
+.btn--full-width {width: 100%;}
 
 .btn:disabled {
   opacity: 0.5;
@@ -811,10 +783,7 @@ html, body, #root {
   }
 }
 
-  .right-panel {
-    display: none;
-  }
-}
+  .right-panel {display: none;}
 
 /* Left panel */
 .left-panel,
